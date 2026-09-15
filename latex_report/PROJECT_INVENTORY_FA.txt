@@ -1,0 +1,24 @@
+ACTIVE  src/xml_loader.py  - بارگذاری جریانی داده‌های خودرو و وظیفه از XML و تعریف VehicleRecord و TaskRecord.
+ACTIVE  src/masac_env.py  - محیط اصلی یادگیری تقویتی: پیکربندی ۱۰ Edge و ۵ UAV، صف‌ها، حرکت UAV، Observation، Global State و Reward.
+ACTIVE  src/uav_control.py  - خوشه‌بندی K-Means، انتساب مراکز ترافیکی به UAVها و منطق جابه‌جایی.
+ACTIVE  src/system_model.py  - پیکربندی شبکه، تعریف Actionها، اعتبارسنجی مسیرها، محاسبات ارتباطی/پردازشی و ارزیابی هر Route.
+ACTIVE  src/masac.py  - پیاده‌سازی MASAC گسسته شامل Actor، دو Critic، Target Critic، Replay Buffer، Action Mask و Update.
+ACTIVE  train_masac.py  - حلقه کامل آموزش: هم‌تراز کردن Task/Vehicle، انتخاب Action، ثبت Transition، Update و ذخیره مدل.
+ACTIVE  evaluate_masac.py  - ارزیابی مدل آموزش‌دیده، تصمیم deterministic، سناریوی UAV/No-UAV و تولید CSVهای خروجی.
+ACTIVE  diagnose_network.py  - آزمون تشخیصی کوتاه برای بررسی اعتبار نرخ، مسیر و رفتار شبکه قبل از آموزش کامل.
+ACTIVE  run_phase3.py  - Entry point ساده برای اجرای متوالی Training و Evaluation.
+LEGACY  src/config.py  - فایل قدیمی پیکربندی نسخه اولیه؛ در مسیر نهایی MASAC استفاده نمی‌شود.
+LEGACY  src/environment.py  - محیط قدیمی نسخه اولیه؛ توسط جریان نهایی MASAC جایگزین شده است.
+LEGACY  src/entities.py  - تعریف Entityهای نسخه اولیه پروژه؛ در مسیر نهایی MASAC فعال نیست.
+LEGACY  src/mobility.py  - منطق Mobility نسخه اولیه؛ مسیر نهایی از داده XML و masac_env استفاده می‌کند.
+LEGACY  src/baseline.py  - Baseline قدیمی نزدیک‌ترین Edge؛ در ارزیابی نهایی MASAC حذف شده است.
+LEGACY  src/simulator.py  - Simulator نسخه قدیمی و غیر فعال در جریان نهایی.
+LEGACY  src/visualization.py  - Visualization نسخه قدیمی؛ نمودارهای نهایی در Notebook ساخته می‌شوند.
+LEGACY  main.py  - Entry point نسخه اولیه/قدیمی و خارج از جریان نهایی MASAC.
+LEGACY  demo_phase3_dataset.py  - اسکریپت Demo قدیمی برای Dataset و خارج از مسیر نهایی آموزش/ارزیابی.
+DOC     requirements_phase3.txt  - وابستگی‌های Python موردنیاز پروژه.
+DOC     README_PHASE3.md  - راهنمای اولیه Phase 3.
+DOC     COLAB_README.md  - راهنمای اجرای پروژه در Google Colab.
+DOC     README_REVISED.txt  - یادداشت‌های نسخه بازبینی‌شده پروژه.
+DOC     README.md  - README مخزن GitHub شامل معماری، اجرا و نگاشت فایل‌ها.
+NOTEBOOK VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb - final Colab workflow

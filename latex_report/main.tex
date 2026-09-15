@@ -1,0 +1,861 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{top=2.25cm,bottom=2.25cm,left=2.15cm,right=2.15cm}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+\definecolor{SharifBlue}{RGB}{22,91,155}
+\definecolor{SoftGray}{RGB}{247,248,250}
+\definecolor{SoftBlue}{RGB}{238,246,253}
+\definecolor{DarkGray}{RGB}{70,70,70}
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{0pt}
+\linespread{1.30}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+\setlist[itemize]{itemsep=0.25em,topsep=0.4em}
+\setlist[enumerate]{itemsep=0.25em,topsep=0.4em}
+\captionsetup{font=small,labelfont=bf}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=SharifBlue,
+    citecolor=SharifBlue,
+    pdftitle={VEC-IoT MASAC Project Report},
+    pdfauthor={}
+}
+
+\newcommand{\lr}[1]{#1}
+\newcommand{\eng}[1]{#1}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\rawcode}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\codepath}[1]{\nolinkurl{#1}}
+\setlength{\emergencystretch}{2em}
+% Suppress non-critical Underfull \hbox diagnostics caused by narrow table cells.
+% Actual compilation errors and Overfull boxes remain visible.
+\hbadness=10000
+\Urlmuskip=0mu plus 1mu
+
+% Screenshot helper. Put images in figures/ with the requested names.
+% If an image is missing, a labeled placeholder is shown instead of a compile error.
+\newcommand{\codeshot}[5]{%
+    \begin{figure}[H]
+        \centering
+        \IfFileExists{figures/#1}{%
+            \includegraphics[width=0.96\textwidth,height=0.43\textheight,keepaspectratio]{figures/#1}%
+        }{%
+            \fbox{\parbox[c][5.8cm][c]{0.92\textwidth}{\centering
+                    \textbf{Code screenshot placeholder}\par\vspace{0.35cm}
+                    Image file: \rawcode{#1}\par
+                    Code file: \rawcode{#2}\par
+                    Suggested section/lines: \rawcode{#3}\par\vspace{0.35cm}
+                    \small Capture the image from the final code in VS Code or Colab and place it in the \code{figures/} directory using the filename above.
+            }}%
+        }
+        \caption{#4}
+        \label{#5}
+    \end{figure}
+}
+
+\newcommand{\resultshot}[4]{%
+    \begin{figure}[H]
+        \centering
+        \IfFileExists{figures/#1}{%
+            \includegraphics[width=0.96\textwidth,height=0.45\textheight,keepaspectratio]{figures/#1}%
+        }{%
+            \fbox{\parbox[c][6.2cm][c]{0.92\textwidth}{\centering
+                    \textbf{Result plot placeholder}\par\vspace{0.35cm}
+                    Filename: \rawcode{#1}\par
+                    Source: \rawcode{#2}\par\vspace{0.35cm}
+                    \small After the final training and evaluation run, place the actual result plot here.
+            }}%
+        }
+        \caption{#3}
+        \label{#4}
+    \end{figure}
+}
+
+\begin{document}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\small VEC-IoT MASAC Project Report}
+\fancyhead[L]{\small Implementation / MASAC / Training / Evaluation}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\setlength{\headheight}{15pt}
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\tableofcontents
+\clearpage
+
+\section*{Abstract}
+This project implements a dynamic vehicular edge-computing environment in which mobile vehicles generate heterogeneous computational tasks, and a decision must be made for each task regarding its processing location and offloading route. The simulation infrastructure includes 10 fixed edge servers, 5 mobile UAVs acting as communication relays, local and edge processing queues, and a set of hard constraints governing feasible routes. UAV positions are updated using K-Means clustering based on the instantaneous vehicle distribution.
+
+The decision-making core of the project is a discrete multi-agent variant of Soft Actor-Critic with a Centralized Training, Decentralized Execution structure. Vehicles are treated conceptually as decision-making agents, while Actor parameters are shared among them. Based on an agent observation, the Actor produces a probability distribution over valid Actions; in contrast, two centralized Critics observe the global State together with the selected Action and estimate its long-term value. Critic training is based on the Bellman target, Actor training combines Q-value and policy entropy, and target stabilization is performed using Target Critics updated through Soft Updates.
+
+In addition to describing the software architecture, this report explains the relationships among project files, the mathematical relations used in the environment and MASAC, the Replay Buffer logic, Action Masking, the Training Loop, and Evaluation. The report contains 30 code screenshots, each documenting a specific part of the architecture.
+
+\section{Overall Project Architecture}
+The software architecture is divided into several independent layers. The data layer reads vehicle and task records from XML. The RL environment layer maintains vehicle states, computation queues, Edge and UAV positions, Observation, Global State, and Reward. The UAV-control layer extracts traffic hotspots. The system-model layer provides the environment with possible Actions, route constraints, and the outcome metrics of each Action. Finally, \code{src/masac.py} implements the Actor policy, Critics, Target Critics, Replay Buffer, and learning rules.
+
+The active project execution path can be represented conceptually as:
+\[
+\begin{aligned}
+    \text{XML Data} &\rightarrow \text{Environment}
+    \rightarrow \text{Observation/State/Mask} \\
+    &\rightarrow \text{Actor Action}
+    \rightarrow \text{Environment Transition} \\
+    &\rightarrow \text{Reward}
+    \rightarrow \text{Replay and MASAC Update}.
+\end{aligned}
+\]
+
+The main files and their roles are listed in Table~\ref{tab:files}.
+
+\begin{longtable}{p{0.29\textwidth} p{0.62\textwidth}}
+    \caption{Main files in the active project flow}\label{tab:files}\\
+    \toprule
+    \textbf{File} & \textbf{Role}\\
+    \midrule
+    \endfirsthead
+    \toprule
+    \textbf{File} & \textbf{Role}\\
+    \midrule
+    \endhead
+    \codepath{src/xml_loader.py} & Streaming ingestion of Vehicle and Task data from XML and maintenance of the record structures.\\
+    \codepath{src/masac_env.py} & Decision environment, queues, Observation, Global State, Reward, temporal progression, and integration of project components.\\
+    \codepath{src/uav_control.py} & K-Means clustering, assignment of centers to UAVs, and movement logic.\\
+    \codepath{src/system_model.py} & Action Space, Action Mask, route topology, and computation of metrics for each Route.\\
+    \codepath{src/masac.py} & Actor, two Critics, Target Critics, Replay Buffer, Action selection, and learning updates.\\
+    \codepath{train_masac.py} & Complete training loop over temporal Vehicle/Task traces.\\
+    \codepath{evaluate_masac.py} & Execution of the trained Policy, scenario comparison, and generation of evaluation CSV files.\\
+    \codepath{diagnose_network.py} & Validation of correctness and baseline communication-model behavior before long training runs.\\
+    \codepath{run_phase3.py} & Execution of the training and evaluation chain from a single Entry Point.\\
+    \codepath{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb} & Colab execution, loading outputs, and plotting final results.\\
+    \bottomrule
+\end{longtable}
+
+\section{Input Data and Temporal Alignment}
+\subsection{Vehicle and Task Records}
+Two immutable data structures are defined in \code{src/xml\_loader.py}. \code{VehicleRecord} stores time, identifier, coordinates, speed, and vehicle priority. In addition to time and identifier, \code{TaskRecord} stores the originating Vehicle, data size, cycles per bit, memory requirement, Criticality level, Deadline, and Slack. This design allows the Observation to be constructed directly from real Trace features and prevents different Tasks from being treated as identical in size, computational complexity, or urgency.
+
+The association between a task and its generating agent is established through
+\[
+\texttt{TaskRecord.creator}=\texttt{VehicleRecord.id}.
+\]
+Consequently, for each Task, the position and state of its corresponding Vehicle are retrieved at the same Timestamp.
+
+\codeshot{screenshot_01.png}{src/xml_loader.py}{14--35: VehicleRecord and TaskRecord}{Structure of Vehicle and Task records in the simulation input.}{fig:xml-records}
+
+\subsection{Streaming Input and Timestamp Alignment}
+Instead of loading the entire XML file into memory, \codepath{iter_vehicle_timesteps()} and \codepath{iter_task_timesteps()} use \code{ElementTree.iterparse}. Each Timestamp is yielded as an independent group, and after processing, the corresponding Element is cleared with \code{elem.clear()} to release memory. This behavior is important for large Datasets because memory complexity is bounded by the number of records in the current Timestamp rather than the full file.
+
+During Training and Evaluation, only Tasks whose generating Vehicle exists in the Snapshot at the same time are retained. If the set of Vehicles present at time $t$ is denoted by $\mathcal{V}_t$ and the Tasks at that time by $\mathcal{T}_t$, the valid set is
+\[
+\mathcal{T}^{\mathrm{valid}}_t=
+\{k\in\mathcal{T}_t\mid \mathrm{creator}(k)\in\mathcal{V}_t\}.
+\]
+This alignment prevents constructing an Observation for a Vehicle that is absent from the Trace.
+
+\codeshot{screenshot_02.png}{src/xml_loader.py}{37--77: iter_vehicle_timesteps and iter_task_timesteps}{Streaming data ingestion and generation of temporal Snapshots.}{fig:xml-stream}
+
+\section{VEC Environment and Resource State}
+\subsection{Environment Configuration}
+The \code{EnvironmentConfig} class in \code{src/masac\_env.py} stores environment-level parameters. In the standard project configuration, the simulation area is $2000\times2000$ meters, with 10 Edges and 5 UAVs. Four Reward weights are also stored in this Config so that the Environment can convert the outcome of an Action into a multi-objective Cost.
+
+\codeshot{screenshot_03.png}{src/masac_env.py}{12--25: EnvironmentConfig}{Environment parameters and Reward weights.}{fig:env-config}
+
+\subsection{Edges, UAVs, and Processing Queues}
+The \code{MASACVECEnv} constructor initializes ten fixed Edges in a $5\times2$ arrangement. At the beginning of each Episode, UAVs are placed at deterministic positions around the center of the area and are subsequently repositioned as traffic moves. A queue measured in CPU cycles is maintained for each Edge, while each Vehicle maintains its own Local queue.
+
+If $Q_e(t)$ is the number of waiting cycles at Edge $e$ at time $t$ and $f_e$ is the CPU frequency of that Edge, queue load in seconds is defined as
+\[
+L_e(t)=\frac{Q_e(t)}{f_e}.
+\]
+The same quantity is used in the Global State and in Load Balancing evaluation.
+
+\codeshot{screenshot_04.png}{src/masac_env.py}{41--121: constructor, edge/UAV initialization and queues}{Initialization of Edges, UAVs, Candidates, and processing queues.}{fig:env-init}
+
+\subsection{Queue Servicing}
+As time advances, queues are serviced according to the available processing capacity. Over an interval $\Delta t$, the Edge queue is updated as
+\[
+Q_e(t+\Delta t)^-=
+\max\left(0,Q_e(t)-f_e\Delta t\right).
+\]
+If a new Task requiring $C_kD_k$ processing cycles is assigned to Edge $e$, after the decision we have
+\[
+Q_e(t+\Delta t)=Q_e(t+\Delta t)^-+C_kD_k.
+\]
+An analogous relation is used for the Local queue of each Vehicle, using the local CPU frequency.
+
+\codeshot{screenshot_05.png}{src/masac_env.py}{147--163: _serve_queues}{Servicing Local and Edge queues using CPU capacity and elapsed time.}{fig:serve-queues}
+
+\section{UAV Control and Repositioning}
+\subsection{Traffic Hotspot Extraction with K-Means}
+At each Timestamp where at least as many Vehicles as UAVs are present, vehicle positions are passed to K-Means. If $x_i\in\mathbb{R}^2$ is the position of Vehicle $i$ and $\mu_j$ is the center of Cluster $j$, K-Means approximates the following problem:
+\[
+\min_{\{\mu_j\},\{c_i\}}
+\sum_{i=1}^{N_v}
+\left\|x_i-\mu_{c_i}\right\|_2^2,
+\qquad c_i\in\{1,\ldots,K\}.
+\]
+In the current configuration, $K=5$. Therefore, five centers are generated as traffic Targets for the UAVs.
+
+\codeshot{screenshot_06.png}{src/uav_control.py}{5--9: compute_traffic_centers}{Computation of five traffic centers using K-Means.}{fig:kmeans}
+
+\subsection{Center Assignment and Bounded Movement}
+To prevent all UAVs from moving to the same center, a one-to-one Greedy Assignment is performed. If the position of UAV $u$ is $p_u$, its Target is $c_u$, and the maximum displacement in one Step is
+\[
+\Delta_{\max}=v_{\mathrm{UAV}}\Delta t,
+\]
+then, if the UAV can reach the target center within the current step,
+\[
+p_u^{\mathrm{new}}=c_u
+\qquad
+\text{if }\|c_u-p_u\|\le \Delta_{\max},
+\]
+otherwise its movement is limited to the maximum allowed displacement:
+\[
+p_u^{\mathrm{new}}
+=
+p_u+
+\frac{c_u-p_u}{\|c_u-p_u\|}\,\Delta_{\max}.
+\]
+This relation prevents the UAV from unrealistically Teleporting instantaneously.
+
+\codeshot{screenshot_07.png}{src/uav_control.py}{12--50: assignment and bounded movement}{One-to-one assignment of centers to UAVs and bounded movement toward each Target.}{fig:uav-assign}
+
+\subsection{Connecting UAV Control to the Environment Timeline}
+The \code{advance()} function first computes elapsed time and services queues, then replaces the current Vehicle Snapshot, and finally executes K-Means and UAV movement. Therefore, the network State at each decision depends on time, Mobility, and previous Workloads.
+
+\codeshot{screenshot_08.png}{src/masac_env.py}{164--202: advance}{Integration of queue servicing and UAV repositioning into the environment Timeline.}{fig:advance}
+
+\section{Action Space and Hard Constraints}
+\subsection{Action-Space Construction}
+The project uses a discrete Action space composed of four families:
+\[
+\mathcal{A}=
+\mathcal{A}_{\mathrm{local}}
+\cup
+\mathcal{A}_{\mathrm{direct}}
+\cup
+\mathcal{A}_{\mathrm{uav}}
+\cup
+\mathcal{A}_{\mathrm{wired}}.
+\]
+For 10 Edges and 5 UAVs,
+\[
+|\mathcal{A}_{\mathrm{local}}|=1,
+\qquad
+|\mathcal{A}_{\mathrm{direct}}|=10,
+\]
+\[
+|\mathcal{A}_{\mathrm{uav}}|=5\times10=50.
+\]
+The Edge-neighborhood graph produces 26 valid directed edges for One-Hop routing; therefore,
+\[
+|\mathcal{A}|=1+10+50+26=87.
+\]
+These 87 Actions are created before an Episode begins and retain fixed indices.
+
+\codeshot{screenshot_09.png}{src/system_model.py}{325--358: build_candidates}{Construction of LOCAL, DIRECT, UAV-RELAY, and WIRED-1HOP Actions.}{fig:candidates}
+
+\subsection{Action Mask as a Hard Constraint}
+The existence of a Candidate does not imply that it is executable at every moment. For each decision, a Boolean vector
+\[
+m(s)=[m_1,\ldots,m_{|\mathcal{A}|}],
+\qquad m_a\in\{0,1\}
+\]
+is constructed. The primary rules are
+\[
+m_{\mathrm{LOCAL}}=
+\mathbf{1}[M_k\le M_{\mathrm{local}}],
+\]
+\[
+m_{\mathrm{DIRECT},e}=
+\mathbf{1}[d(v,e)\le 300],
+\]
+\[
+m_{\mathrm{UAV},u,e}=
+\mathbf{1}[d(v,u)\le500]\,
+\mathbf{1}[d(u,e)\le500],
+\]
+and for wired One-Hop routing,
+\[
+m_{\mathrm{WIRED},i,j}=
+\mathbf{1}[d(v,i)\le300]\,
+\mathbf{1}[j\in\mathcal{N}(i)].
+\]
+Consequently, an invalid Action never enters the Policy's selection space instead of merely being discouraged through a negative Reward.
+
+\codeshot{screenshot_10.png}{src/system_model.py}{360--402: valid_action_mask}{Applying memory, 300-meter, UAV-coverage, and One-Hop-neighborhood constraints in the Action Mask.}{fig:valid-mask}
+
+\section{Communication Model and Action-Outcome Computation}
+This section is responsible for converting a selected Action into the metrics required by the Environment for Reward computation and result reporting. The main relations are implemented in \code{src/system\_model.py}. Although the primary focus of this report is the learning agent, the key system-model equations are also presented to complete the Environment flow.
+
+\subsection{Link Rate}
+According to the project model, link rate is computed as
+\[
+R_{i,j}=\eta B\log_2\left(1+\frac{S}{N+I}\right),
+\]
+where
+\[
+S=p_{i,j}G_{i,j}.
+\]
+The parameter $\eta$ is the link's Bandwidth share, $B$ is total Bandwidth, and $I$ is interference associated with the Link type. Packet Loss is implemented as an SINR-based Surrogate because the input system model does not provide an independent Packet-Loss formula.
+
+\codeshot{screenshot_11.png}{src/system_model.py}{161--181 and 246--278: path loss, signal and link_rate}{Core channel functions and computation of link rate and the Packet-Loss Surrogate.}{fig:link-model}
+
+\subsection{Processing Time and Energy}
+If Task size in bits is $D_k$ and the number of cycles per bit is $C_k$, the required number of cycles is
+\[
+W_k=C_kD_k.
+\]
+Accounting for the queue, processing completion time is
+\[
+T_k^{\mathrm{comp}}=\frac{Q+W_k}{f_{\mathrm{core}}}.
+\]
+The processing-energy relation is implemented according to the model supplied with the project as
+\[
+E_k^{\mathrm{exe}}=
+\zeta f_{\mathrm{core}}^{\gamma}C_k.
+\]
+Transmission energy is obtained from
+\[
+E_k^{\mathrm{trans}}=p\frac{D_k}{R}.
+\]
+
+\codeshot{screenshot_12.png}{src/system_model.py}{283--320: bits, cycles, compute time and compute energy}{Conversion of a Task into computational Workload and computation of execution time and energy.}{fig:compute-model}
+
+\subsection{Composition of Route Delays}
+For a direct Route, total delay includes transmission, queueing, and execution:
+\[
+T^{\mathrm{DIRECT}}
+=T_{v\rightarrow e}^{\mathrm{tx}}
++T_e^{\mathrm{queue}}
++T_e^{\mathrm{exe}}.
+\]
+For a UAV Relay,
+\[
+T^{\mathrm{UAV}}
+=T_{v\rightarrow u}^{\mathrm{tx}}
++T_{u\rightarrow e}^{\mathrm{tx}}
++T_e^{\mathrm{queue}}
++T_e^{\mathrm{exe}}.
+\]
+For a wired Hop,
+\[
+T^{\mathrm{WIRED}}
+=T_{v\rightarrow i}^{\mathrm{tx}}
++T_{i\rightarrow j}^{\mathrm{wired}}
++T_j^{\mathrm{queue}}
++T_j^{\mathrm{exe}}.
+\]
+Local Execution uses no network link, and its Bitrate is therefore deliberately retained as N/A.
+
+\section{Construction of Observation and Global State}
+\subsection{Global State for the Centralized Critic}
+The \code{\_global\_features()} function produces information about the vehicle-population distribution, Edge positions, the Load of each Edge, CPU frequencies, and UAV positions. If the Global Feature vector is denoted by $g_t$, the centralized State is
+\[
+s_t=[o_t,g_t].
+\]
+With 10 Edges and 5 UAVs, Global Features contain 6 statistical vehicle features, 4 features per Edge, and 2 features per UAV; therefore,
+\[
+\dim(g_t)=6+4(10)+2(5)=56.
+\]
+
+\codeshot{screenshot_13.png}{src/masac_env.py}{223--260: _global_features}{Construction of the Global State from vehicle statistics, Edge Load/CPU, and UAV positions.}{fig:global-features}
+
+\subsection{Agent Observation}
+The local Observation consists of 11 Vehicle/Task/Local-Queue features, Vehicle-to-Edge channel Gain for 10 Edges, and two features---Gain and Distance---for each UAV. Therefore, with 5 UAVs,
+\[
+\dim(o_t)=11+10+2(5)=31.
+\]
+Consequently, the State provided to the Critic has dimension
+\[
+\dim(s_t)=31+56=87.
+\]
+This number also equals the Action Dimension in the standard configuration, although this equality is merely a consequence of the current parameterization and is not an architectural requirement.
+
+The agent Observation can be written as
+\[
+o_t=
+[x_v,y_v,v_v,p_v,\;D_k,C_k,M_k,c_k,\text{slack}_k,\text{deadline}_k,\;L_v,\;\text{channel features}],
+\]
+where all components are Normalized or Clipped before entering the network.
+
+\codeshot{screenshot_14.png}{src/masac_env.py}{262--304: observation}{Construction of the Observation, concatenation of Global Features, and generation of the Action Mask.}{fig:observation}
+
+\section{Reward and Single-Decision Dynamics}
+After an Action is selected, \code{step\_task()} first rechecks its validity, computes its Route Metrics, and then adds the Task Workload to the destination queue. Reward is defined as the negative of a multi-objective Cost:
+\[
+\boxed{
+r_t=-\left(
+T_t
++\lambda_E E_t
++\lambda_P P_t^{\mathrm{loss}}
++\lambda_L B_t
++\lambda_D M_t^{\mathrm{deadline}}
+\right)
+}.
+\]
+Here, $T_t$ is total latency, $E_t$ is energy, $P_t^{\mathrm{loss}}$ is Packet Loss, $B_t$ is the load-imbalance measure, and $M_t^{\mathrm{deadline}}$ is the Deadline Miss magnitude.
+
+Load imbalance is computed using the coefficient of variation of Edge queues:
+\[
+B_t=\frac{\sigma(L_1,\ldots,L_E)}{\mu(L_1,\ldots,L_E)}.
+\]
+If the Deadline Window for a Task is $D_k^{\max}$, the Miss magnitude is
+\[
+M_t^{\mathrm{deadline}}=
+\max(0,T_t-D_k^{\max}).
+\]
+In the current Config, the coefficients are $\lambda_E=0.15$, $\lambda_P=1.50$, $\lambda_L=0.40$, and $\lambda_D=2.00$. These coefficients are Hyperparameters; the Reward itself is an Environment output and is not a Hyperparameter.
+
+\codeshot{screenshot_15.png}{src/masac_env.py}{321--382: step_task}{Execution of an Action, update of the destination queue, and construction of the multi-objective Reward.}{fig:reward}
+
+\section{MASAC Agent Architecture}
+\subsection{Precise Definition of the Algorithm in This Project}
+The current implementation is a \textbf{Discrete MASAC-style CTDE} system with sequential task-level decisions. Vehicles are conceptual Agents, but the Actor is Shared across all Vehicles. Critics observe the global State, while the Action input to a Critic is only the Action of the currently deciding agent; no simultaneous Joint Action is constructed for all Vehicles. Therefore, the precise description of the implementation is: ``Shared-policy, task-level sequential multi-agent SAC with centralized critics.''
+
+At each decision, the Actor with parameters $\theta$ produces the policy
+\[
+\pi_\theta(a\mid o).
+\]
+Two Critics with parameters $\phi_1$ and $\phi_2$ approximate
+\[
+Q_{\phi_1}(s,a),\qquad Q_{\phi_2}(s,a),
+\]
+and two Target Critics with parameters $\bar\phi_1,\bar\phi_2$ are slowly changing copies of them.
+
+\subsection{Hyperparameters and MLP Structure}
+The primary parameters are $\gamma=0.98$, $\tau=0.01$, $\alpha=0.15$, a Learning Rate of $3\times10^{-4}$, a Batch Size of 128, and a Hidden Size of 256. The Actor uses the architecture
+\[
+31\rightarrow256\rightarrow256\rightarrow87.
+\]
+The Critic receives $[s,\mathrm{onehot}(a)]$ as input; therefore, in the standard configuration, its input dimension is
+\[
+87+87=174,
+\]
+and its architecture is
+\[
+174\rightarrow256\rightarrow256\rightarrow1.
+\]
+
+For an MLP with two hidden layers,
+\[
+h_1=\mathrm{ReLU}(W_1x+b_1),
+\]
+\[
+h_2=\mathrm{ReLU}(W_2h_1+b_2),
+\]
+\[
+y=W_3h_2+b_3.
+\]
+For the Actor, $y$ is the Logit vector; for the Critic, $y$ is a scalar Q-value.
+
+\codeshot{screenshot_16.png}{src/masac.py}{20--46: MASACConfig and MLP}{MASAC Hyperparameters and the Actor/Critic neural-network structure.}{fig:masac-config}
+
+\subsection{Replay Buffer}
+Each Interaction is stored as the following Transition:
+\[
+\boxed{
+\tau_t=(s_t,a_t,r_t,s_{t+1},d_t,m_t,m_{t+1})
+}.
+\]
+Here, $d_t$ is the Terminal Flag and $m_t,m_{t+1}$ are the Action Masks. The Replay Buffer forms the set $\mathcal{D}$, and a training Batch is sampled as
+\[
+\mathcal{B}\sim\mathrm{Uniform}(\mathcal{D}).
+\]
+This reduces strong temporal dependence between consecutive Trace samples and allows an experience to be reused in multiple stochastic Updates.
+
+\codeshot{screenshot_17.png}{src/masac.py}{49--81: ReplayBuffer}{Storage of Transitions and random Minibatch sampling for training.}{fig:replay}
+
+\subsection{Actor, Critics, and Target Critics}
+The \code{DiscreteMASAC} constructor creates one Actor, two primary Critics, and two Target Critics. At the beginning of training, the Targets are copied exactly from the primary Critics:
+\[
+\bar\phi_1\leftarrow\phi_1,
+\qquad
+\bar\phi_2\leftarrow\phi_2.
+\]
+The Critics have independent Optimizers, and the Actor is updated separately with Adam. Target Critics do not have direct Optimizers and are updated only through Soft Updates.
+
+\codeshot{screenshot_18.png}{src/masac.py}{84--112: DiscreteMASAC constructor}{Construction of the Actor, Q1/Q2, Target Q1/Q2, and independent Optimizers.}{fig:agent-init}
+
+\subsection{Policy Masking and Action Selection}
+The Actor first produces the Logit vector
+\[
+z_\theta(o)=[z_1,\ldots,z_{|\mathcal{A}|}].
+\]
+The Mask then maps invalid Logits to a very negative value. For a valid Action $(m_a=1)$, the Logit remains unchanged:
+\[
+\tilde z_a=z_a,
+\]
+while for an invalid Action $(m_a=0)$ it is mapped toward a very negative value:
+\[
+\tilde z_a\rightarrow -\infty.
+\]
+In the implementation, the finite value \code{-1e9} is used as a numerical approximation of $-\infty$.
+The discrete Policy is obtained by Softmax:
+\[
+\boxed{
+\pi_\theta(a\mid o)=
+\frac{e^{\tilde z_a}}
+{\sum_b e^{\tilde z_b}}
+}.
+\]
+Therefore, for an invalid Action, $\pi_\theta(a\mid o)\approx0$.
+
+During Training, an Action is sampled stochastically from the Categorical Policy:
+\[
+a_t\sim\pi_\theta(\cdot\mid o_t),
+\]
+whereas during Evaluation the selection is Deterministic:
+\[
+a_t^*=\arg\max_{a:m_a=1}\pi_\theta(a\mid o_t).
+\]
+
+\codeshot{screenshot_19.png}{src/masac.py}{114--127: masked_logits and act}{Application of the Action Mask and the difference between Sampling in Training and Argmax in Evaluation.}{fig:act}
+
+\subsection{Construction of Probability and Log-Probability}
+The \code{\_dist()} function uses a Categorical Distribution to return $\pi(a\mid o)$ and $\log\pi(a\mid o)$ for all Actions. These quantities are used directly in the Entropy Term and Expected Soft Value.
+
+\codeshot{screenshot_20.png}{src/masac.py}{129--145: _dist and beginning of update}{Generation of Probability/Log-Probability and computation of Q for the actual Batch Action.}{fig:dist-start-update}
+
+\section{Mathematical Training of MASAC}
+This is the central learning section. An Update is performed once the Replay Buffer reaches
+\[
+|\mathcal{D}|\ge\max(\text{batch size},\text{warmup}).
+\]
+In the current Config, Warm-up is 1000.
+
+\subsection{1. Critic Prediction for the Actual Action}
+For each sample $(s_t,a_t)$ in the Batch, the Action is converted to One-Hot form:
+\[
+e(a_t)\in\{0,1\}^{|\mathcal{A}|}.
+\]
+The Critic input is
+\[
+x_t^Q=[s_t,e(a_t)],
+\]
+and the two predictions
+\[
+q_{1,t}=Q_{\phi_1}(s_t,a_t),
+\qquad
+q_{2,t}=Q_{\phi_2}(s_t,a_t)
+\]
+are computed.
+
+\subsection{2. Soft Value of the Next State}
+For the next State, the Actor produces probabilities over all valid Actions:
+\[
+\pi_\theta(a'\mid o_{t+1}).
+\]
+For each Action, the Target Critics produce
+\[
+Q_{\bar\phi_1}(s_{t+1},a'),
+\qquad
+Q_{\bar\phi_2}(s_{t+1},a'),
+\]
+and the conservative estimate is
+\[
+\boxed{
+Q_{\mathrm{targ}}(s',a')=
+\min\left(
+Q_{\bar\phi_1}(s',a'),
+Q_{\bar\phi_2}(s',a')
+\right)
+}.
+\]
+The Soft State Value is then defined as an expectation over all discrete Actions:
+\[
+\boxed{
+V_{\mathrm{soft}}(s')=
+\sum_{a'}
+\pi_\theta(a'\mid o')
+\left[
+Q_{\mathrm{targ}}(s',a')
+-\alpha\log\pi_\theta(a'\mid o')
+\right]
+}.
+\]
+The first term represents exploitation, while the second preserves Policy Entropy.
+
+\codeshot{screenshot_21.png}{src/masac.py}{147--161: target critics, q-matrix, soft value and target}{Computation of the Soft Value of the next State and the Bellman Target using the Target Critics.}{fig:bellman-target}
+
+\subsection{3. Bellman Target and Critic Training}
+The Bellman Target is
+\[
+\boxed{
+y_t=r_t+\gamma(1-d_t)V_{\mathrm{soft}}(s_{t+1})
+}.
+\]
+If the Transition is Terminal, $d_t=1$ and the Future Value is removed. Each Critic is trained using the Mean Squared Bellman Error:
+\[
+\boxed{
+L_{Q_1}(\phi_1)=
+\mathbb{E}_{\mathcal{B}}
+\left[
+\left(Q_{\phi_1}(s,a)-y\right)^2
+\right]
+}
+\]
+and
+\[
+\boxed{
+L_{Q_2}(\phi_2)=
+\mathbb{E}_{\mathcal{B}}
+\left[
+\left(Q_{\phi_2}(s,a)-y\right)^2
+\right].
+}
+\]
+Gradient Descent updates the Critic parameters as
+\[
+\phi_i\leftarrow
+\phi_i-\eta_Q\nabla_{\phi_i}L_{Q_i}.
+\]
+Thus, the Critic is trained directly, while the Target Critic is used only to construct a stable target.
+
+\codeshot{screenshot_22.png}{src/masac.py}{163--170: q losses and optimizer steps}{Computation of Bellman Error and direct training of Q1 and Q2 through Backpropagation.}{fig:critic-update}
+
+\subsection{4. Why Two Critics?}
+Using a single Critic can lead to Overestimation. Therefore, both the Target and Actor Update use
+\[
+Q_{\min}(s,a)=\min(Q_{\phi_1}(s,a),Q_{\phi_2}(s,a)).
+\]
+For example, if
+\[
+Q_1=-2.0,\qquad Q_2=-2.7,
+\]
+the value used is $-2.7$. This conservative choice reduces the probability that the Policy will learn from overly optimistic estimates.
+
+\subsection{5. Actor Objective}
+After the Critic Updates, the Actor produces probabilities over all valid Actions for the Batch States. The Actor aims to increase Expected Q while simultaneously preserving Entropy. The discrete Loss used in the code is
+\[
+\boxed{
+L_\pi(\theta)=
+\mathbb{E}_{s\sim\mathcal{B}}
+\left[
+\sum_a
+\pi_\theta(a\mid o)
+\left(
+\alpha\log\pi_\theta(a\mid o)
+-Q_{\min}(s,a)
+\right)
+\right]
+}.
+\]
+Since
+\[
+\mathcal{H}(\pi(\cdot\mid o))
+=-\sum_a\pi(a\mid o)\log\pi(a\mid o),
+\]
+minimizing the Loss above is approximately equivalent to maximizing
+\[
+\boxed{
+\mathbb{E}[Q_{\min}(s,a)]
++\alpha\mathcal{H}(\pi(\cdot\mid o))
+}.
+\]
+The Actor therefore has two simultaneous objectives: selecting Actions for which the Critic predicts higher Long-Term Return, and preventing premature collapse of the Policy to a fully Deterministic Action.
+
+\codeshot{screenshot_23.png}{src/masac.py}{172--186: actor q-matrix, actor_loss and optimizer}{Computation of Actor Loss from Q1/Q2 and Entropy, followed by updating Actor parameters.}{fig:actor-update}
+
+\subsection{6. How the Actor Gradient Converts Critic Feedback into Weights}
+The Actor is not modified directly by the Critic. Q-values enter the Loss, after which Backpropagation computes the Gradient with respect to Actor parameters:
+\[
+\boxed{
+\theta\leftarrow
+\theta-\eta_\pi\nabla_\theta L_\pi(\theta)
+}.
+\]
+Using
+\[
+\nabla_\theta\pi_\theta(a\mid o)=
+\pi_\theta(a\mid o)\nabla_\theta\log\pi_\theta(a\mid o),
+\]
+the Gradient can be written as
+\[
+\nabla_\theta L_\pi=
+\mathbb{E}
+\left[
+\sum_a
+\pi_\theta(a\mid o)
+\nabla_\theta\log\pi_\theta(a\mid o)
+\left(
+\alpha\log\pi_\theta(a\mid o)-Q_{\min}(s,a)+\alpha
+\right)
+\right].
+\]
+In practice, PyTorch computes this derivative with \codepath{actor_loss.backward()}, and Adam updates the weights through \codepath{self.oa.step()}. Actions with better Q values tend to receive higher Probability, while the Entropy Term prevents the Probabilities of other valid Actions from rapidly collapsing to zero.
+
+\subsection{7. Role of the Entropy Coefficient in Soft Actor-Critic}
+$\alpha$ controls the strength of entropy Regularization. As $\alpha\rightarrow0$, Actor Loss approaches pure Q maximization and the Policy becomes more Greedy. Increasing $\alpha$ produces a flatter Probability distribution and more Exploration. In the current implementation, $\alpha=0.15$ is fixed and Automatic Entropy Tuning is not implemented.
+
+\subsection{8. Soft Update for Target Critics}
+Target Critics are not trained directly with Gradient Descent. After each Update, their parameters are changed through Polyak Averaging:
+\[
+\boxed{
+\bar\phi_i
+\leftarrow
+(1-\tau)\bar\phi_i+\tau\phi_i,
+\qquad i\in\{1,2\}.
+}
+\]
+With $\tau=0.01$, only one percent of each primary Critic update is incorporated into its Target at each step. Consequently, the Bellman target changes more slowly than it would if the actively trained network were used directly, improving Training stability.
+
+\codeshot{screenshot_24.png}{src/masac.py}{188--196: soft target update}{Slow update of Target Critics using coefficient $\tau$.}{fig:target-update}
+
+\section{Centralized Training and Decentralized Execution (CTDE)}
+During Training, the Actor receives only the Observation $o_i$ of the agent currently making a decision, while the Critic has access to the global State $s$:
+\[
+\text{Actor: }\pi_\theta(a_i\mid o_i),
+\qquad
+\text{Critic: }Q_\phi(s,a_i).
+\]
+This information asymmetry allows the Critic to better evaluate the effect of a decision on queues, the overall Edge state, and UAV positions. After Training, the Critic is no longer required for Action selection, and the Policy executes
+\[
+a_i^*=\arg\max_{a:m_a=1}\pi_\theta(a\mid o_i).
+\]
+Thus, during Deployment the decision path consists of the Actor, Observation, and Action Mask; Critics are learning instruments rather than components of Policy execution.
+
+\section{Task-Level Training Loop}
+\subsection{Constructing a True Transition Using the Next Decision State}
+In \code{train\_masac.py}, each Episode advances over temporal Snapshots. A key detail is that the previous Transition is retained in the variable \code{pending} until the next Decision State arrives. Once the next Task Observation has been constructed, that State is inserted into the previous Transition as $s_{t+1}$ before the Transition enters Replay. Therefore, Replay does not use an artificial immediate State; Next State is the actual next decision State in the Trace.
+
+The flow of a Transition is
+\[
+(s_t,a_t,r_t)
+\xrightarrow{\text{next task arrives}}
+(s_t,a_t,r_t,s_{t+1})
+\rightarrow\mathcal{D}.
+\]
+For the final Task of an Episode, the Transition is recorded as Terminal with $d=1$, and Future Value is removed from the Bellman Target.
+
+\codeshot{screenshot_25.png}{train_masac.py}{108--182: episode/task loop, pending transition, act, step and update}{Task-level Training loop and connection of the true next State to the Replay Transition.}{fig:training-loop}
+
+\subsection{Summary of the Training Algorithm}
+The Training process can be summarized as follows:
+\begin{enumerate}
+    \item Receive the current Vehicle and Task Snapshot.
+    \item Construct Observation $o_t$, State $s_t$, and Mask $m_t$.
+    \item If the previous Transition is Pending, store $s_t$ as its Next State in Replay.
+    \item Sample $a_t\sim\pi_\theta(\cdot\mid o_t)$ from the Policy subject to the Action Mask.
+    \item Execute the Action in the Environment and obtain Reward $r_t$.
+    \item Keep the Transition Pending until the next State arrives.
+    \item Once Replay has reached Warm-up, sample a random Minibatch.
+    \item Construct the Bellman Target using the Target Critics and update Q1/Q2.
+    \item Update the Actor using $L_\pi$.
+    \item Move the Target Critics through a Soft Update.
+    \item Repeat for subsequent Tasks and Episodes.
+\end{enumerate}
+
+\section{Evaluation and Deployment}
+\subsection{Loading the Model and Deterministic Decisions}
+During Evaluation, the same Observation/State/Action dimensions are constructed, the trained Checkpoint is loaded, and the Actor is executed with \code{deterministic=True}. Exploration is therefore removed and the highest valid Logit is selected.
+
+\subsection{Matched Comparison Between UAV and No-UAV}
+To analyze the effect of UAVs, before executing the Actor's actual Action, Evaluation examines all valid Routes from the same Pre-action State. Two sets are constructed:
+\[
+\mathcal{R}_{\mathrm{UAV}}=
+\{a\mid a\text{ is feasible UAV\_RELAY}\},
+\]
+\[
+\mathcal{R}_{\mathrm{NoUAV}}=
+\{a\mid a\text{ is feasible DIRECT or WIRED\_1HOP}\}.
+\]
+LOCAL is deliberately excluded from this communication comparison. A Task enters the comparison Pair only when both sets are non-empty, and the minimum-Latency Route is selected within each scenario. Consequently, the UAV and No-UAV columns are compared on exactly the same Tasks. This component is a scenario Benchmark and is distinct from the actual MASAC Action.
+
+The Actor's actual Action is subsequently executed as
+\[
+a^*=\arg\max_a\pi_\theta(a\mid o),
+\]
+and its Metrics are recorded in \code{evaluation.csv}.
+
+\codeshot{screenshot_26.png}{evaluate_masac.py}{155--223: matched scenarios and deterministic MASAC action}{Matched UAV/No-UAV comparison followed by execution of the Actor's actual decision during Evaluation.}{fig:evaluation-decision}
+
+\subsection{Output Metrics}
+Evaluation records the following metrics:
+\begin{itemize}
+    \item Total Latency for each Task;
+    \item Total Energy;
+    \item Packet Loss and Average Network Bitrate only for network Routes;
+    \item Task Success Rate based on Deadline;
+    \item actual Load of each Edge after every Task;
+    \item UAV positions and the number of UAVs present at each Timestamp;
+    \item distribution of Actor decisions.
+\end{itemize}
+
+LOCAL Bitrate is N/A because no communication link is used and is therefore excluded from Average Network Rate. Load is taken from the real queue after the Task, not from the zero Snapshot before the Workload is assigned.
+
+\codeshot{screenshot_27.png}{evaluate_masac.py}{238--317: metrics, route counts and CSV writing}{Computation of Summary Metrics and generation of final evaluation CSV files.}{fig:evaluation-metrics}
+
+\section{Notebook and Plot Generation}
+The final Notebook, \code{VEC\_IoT\_MASAC\_Complete\_Colab\_Matched\_Final.ipynb}, provides the execution chain in Colab: mounting Drive, checking Dependencies, running Diagnostics, Training, Evaluation, reading CSV outputs, and plotting results. To avoid Binary incompatibilities, the Notebook does not force a NumPy Upgrade at startup.
+
+\codeshot{screenshot_28.png}{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb}{cells that load evaluation CSV files}{Loading Evaluation outputs for plotting final results.}{fig:notebook-load}
+
+\subsection{Primary Expected Plots}
+
+\resultshot{screenshot_29.png}{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb}{Matched comparison of latency in UAV and No-UAV modes and mean energy consumption}{fig:results-latency-energy}
+
+\resultshot{screenshot_32.png}{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb}{Set of Packet Loss and Bitrate plots}{fig:results-other-a}
+
+\resultshot{screenshot_31.png}{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb}{Set of Edge Load and Success Rate plots}{fig:results-other-b}
+
+\resultshot{screenshot_30.png}{VEC_IoT_MASAC_Complete_Colab_Matched_Final.ipynb}{Set of UAV Movement and decision-distribution plots}{fig:results-other-c}
+
+\section{Interpretation of Results}
+After inserting the final plots, interpretation should be based on relationships among metrics rather than only on whether each bar is small or large. For example:
+\begin{itemize}
+    \item A reduction in Latency on UAV Routes is desirable only if it does not create a disproportionate increase in Energy or Packet Loss.
+    \item Edge Load Distribution indicates how effectively the Policy prevents Workload from concentrating on a single Edge.
+    \item Decision Distribution should be consistent with environment conditions; LOCAL in this plot is a processing decision and should not be presented as a fourth communication route.
+    \item UAV Trajectory should show changes in UAV positions together with Traffic Hotspots; a constant count of 5 UAVs alone is not a useful indicator of Positioning quality.
+    \item The Matched UAV/No-UAV Plot compares the two Route families on identical Tasks and is therefore fairer for analyzing the effect of Relaying than a comparison over two different Task sets.
+\end{itemize}
+
+\section{Limitations and Scope of Implementation Claims}
+For an accurate report, several points must remain explicit:
+\begin{itemize}
+    \item Cloud appears in the general architectural description, but the current Action Space does not implement an independent CLOUD Action or a Cloud processing Queue.
+    \item In the current version, UAVs are communication Relays; a Compute Server on the UAV is not modeled.
+    \item The MASAC implementation does not construct a simultaneous Joint Action for all Vehicles; decisions are made sequentially at the Task level, and the Actor is Shared across Agents.
+    \item Packet Loss is a numerical SINR-based Surrogate because the input model does not provide an independent Packet-Loss formula.
+    \item Numerical values such as CPU Frequencies, Energy coefficients, the 300- and 500-meter radii, and Reward Weights are experimental parameters and are not presented as values imposed by the source mathematical relations.
+\end{itemize}
+
+\section{Conclusion}
+The project provides a complete Pipeline from temporal Vehicle/Task data to Policy learning and evaluation. The environment assigns measurable Consequences to each decision through real queues and UAV Mobility. The Action Mask applies physical constraints before Policy selection. The Actor constructs a discrete distribution over valid Actions and samples from it during Training. Using the Global State and Bellman Target, two Critics learn the Long-Term Value of decisions. The Actor then uses the Critics' Q-values together with Entropy Regularization to increase the Probability of better Actions. Target Critics stabilize the learning target through Soft Updates.
+
+During Deployment, Critics are not required for direct Action selection; the trained Actor produces decisions using the Observation and Action Mask. Evaluation additionally creates a Matched comparison between UAV and No-UAV cases and supplies the final Notebook with Metrics for analyzing Latency, Energy, Packet Loss, Rate, Load Balancing, Success, and UAV Mobility.
+
+\newpage
+\appendix
+
+\section*{Sources and Basis of the Report}
+\begin{enumerate}
+    \item The active VEC-IoT MASAC project code, including the principal files:\\
+    \codepath{src/masac.py}, \codepath{src/masac_env.py}, \codepath{src/uav_control.py},
+    \codepath{src/system_model.py}, \codepath{src/xml_loader.py}, \codepath{train_masac.py}, and \codepath{evaluate_masac.py}.
+    \item The system model and communication/computation relations supplied with the project.
+    \item The final Notebook \code{VEC\_IoT\_MASAC\_Complete\_Colab\_Matched\_Final.ipynb} for Training, Evaluation, and result plotting.
+\end{enumerate}
+
+\end{document}
